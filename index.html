@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>QR Code Scanner</title>
+    <script src="https://cdn.jsdelivr.net/npm/jsqr@1.0.0/dist/jsQR.min.js"></script>
+</head>
+<body>
+    <h2>QR Code Scanner</h2>
+    
+    <div id="scanner-container">
+        <video id="video" width="400" height="300" autoplay></video>
+        <canvas id="canvas" style="display: none;"></canvas>
+    </div>
+
+    <div id="result-container" style="display: none;">
+        <p id="result"></p>
+        <button onclick="restartScanner()">Scan Another QR Code</button>
+    </div>
+
+    <script>
+    const video = document.getElementById("video");
+const canvas = document.getElementById("canvas");
+const context = canvas.getContext("2d");
+const resultElement = document.getElementById("result");
+const scannerContainer = document.getElementById("scanner-container");
+const resultContainer = document.getElementById("result-container");
+
+async function startCamera() {
+    try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+        video.srcObject = stream;
+        video.setAttribute("playsinline", true);  // Ensures the video plays on iOS
+        video.onloadedmetadata = () => requestAnimationFrame(scanQR);
+
+    } catch (error) {
+        console.error("Error accessing camera: ", error);
+        resultElement.textContent = "Camera access denied!";
+    }
+}
+
+function scanQR() {
+    if (scannerContainer.style.display === "none") return;  // Stop scanning if result is shown
+
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    context.drawImage(video, 0, 0, canvas.width, canvas.height);
+    const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+    const qrCode = jsQR(imageData.data, imageData.width, imageData.height);
+
+    if (qrCode) {
+        console.log("✅ QR Code Detected:", qrCode.data);
+        
+        // Stop scanning to prevent multiple detections
+        scannerContainer.style.display = "none";
+        resultContainer.style.display = "block";
+
+        fetch("/scan", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ qr_data: qrCode.data })
+        })
+        .then(response => response.json())
+        .then(data => {
+            console.log("📢 Server Response:", data);
+            
+            if (data.status === "success" && data.data) {
+                resultElement.innerHTML = `
+                    <h3>Details:</h3>
+                    <p><strong>Title:</strong> ${data.data.title}</p>
+                    <p><strong>Author:</strong> ${data.data.author}</p>
+                    <p><strong>Email:</strong> ${data.data.email}</p>
+                    <p><strong>Institute:</strong> ${data.data.institute}</p>
+                    <p><strong>Presenter:</strong> ${data.data.presenter}</p>
+                    <p><strong>Mode:</strong> ${data.data.mode}</p>
+                `;
+            } else if (data.status === "used") {
+                resultElement.innerHTML = "<h3 style='color:red;'>🚨 QR Code Already Used!</h3>";
+            } else {
+                resultElement.innerHTML = "<h3 style='color:red;'>❌ Invalid QR Code!</h3>";
+            }
+        })
+        .catch(error => {
+            console.error("❌ Error sending request:", error);
+            resultElement.innerHTML = "<h3 style='color:red;'>Error processing QR Code</h3>";
+        });
+    } else {
+        console.log("⛔ No QR Code detected");
+    }
+
+    requestAnimationFrame(scanQR);
+}
+
+function restartScanner() {
+    resultContainer.style.display = "none";
+    scannerContainer.style.display = "block";
+    requestAnimationFrame(scanQR);
+}
+
+video.addEventListener("play", () => requestAnimationFrame(scanQR));
+startCamera();
+</script>
+</body>
+</html>
